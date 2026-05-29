@@ -37,6 +37,7 @@ export default function ImageUpload({ onFile, onReset }: ImageUploadProps) {
   const processFile = useCallback(
     async (raw: File) => {
       setErrorMsg(null);
+      console.log('File selected:', { name: raw.name, type: raw.type, sizeKb: (raw.size / 1024).toFixed(1) });
 
       if (!raw.type.startsWith('image/') && !isHeicFile(raw)) {
         setErrorMsg('Please select an image file.');
@@ -56,7 +57,9 @@ export default function ImageUpload({ onFile, onReset }: ImageUploadProps) {
         setPreviewUrl(url);
         setState('ready');
         onFile(file, url);
-      } catch {
+        console.log('Preview ready.');
+      } catch (err: any) {
+        console.error('Error processing image:', err);
         setErrorMsg('Could not process this image. Please try another file.');
         setState('error');
       }
@@ -65,6 +68,7 @@ export default function ImageUpload({ onFile, onReset }: ImageUploadProps) {
   );
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('onChange fired. Files:', e.target.files?.length);
     const file = e.target.files?.[0];
     if (file) processFile(file);
   };
