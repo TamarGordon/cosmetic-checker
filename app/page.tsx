@@ -1,17 +1,52 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { ArrowRight, Image as ImageIcon, LoaderCircle, Sparkles } from 'lucide-react';
 import ImageUpload from './components/ImageUpload';
 import AnalysisResults from './components/AnalysisResults';
+import SkinProfileSelector, { SkinProfile } from './components/SkinProfileSelector';
 import MobileConsoleDebugger from './components/MobileConsoleDebugger';
+import { Logo } from './components/Logo';
 
 type CheckState = 'idle' | 'checking' | 'done' | 'error';
+
+const DEFAULT_PROFILE: SkinProfile = {
+  skinType: 'normal',
+  conditions: [],
+};
 
 export default function Home() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [checkState, setCheckState] = useState<CheckState>('idle');
   const [analysisResults, setAnalysisResults] = useState<any | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [profile, setProfile] = useState<SkinProfile>(DEFAULT_PROFILE);
+
+  // Load profile from sessionStorage on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem('cosmetic-checker-profile');
+        if (saved) {
+          setProfile(JSON.parse(saved));
+        }
+      } catch (e) {
+        console.error('Failed to load profile', e);
+      }
+    }
+  }, []);
+
+  // Update profile and persist in sessionStorage
+  const handleProfileChange = (newProfile: SkinProfile) => {
+    setProfile(newProfile);
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('cosmetic-checker-profile', JSON.stringify(newProfile));
+      } catch (e) {
+        console.error('Failed to save profile', e);
+      }
+    }
+  };
 
   const handleFile = (file: File, _previewUrl: string) => {
     setUploadedFile(file);
@@ -35,8 +70,10 @@ export default function Home() {
     try {
       const body = new FormData();
       body.append('image', uploadedFile);
+      body.append('profile', JSON.stringify(profile));
+
       const res = await fetch('/api/check', { method: 'POST', body });
-      
+
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.error || `Server error (${res.status})`);
@@ -51,62 +88,90 @@ export default function Home() {
     }
   };
 
+  const handleReAnalyze = async (newProfile: SkinProfile) => {
+    if (!analysisResults?.ingredients) return;
+    setCheckState('checking');
+    setErrorMessage(null);
+
+    // Save the new profile as active
+    handleProfileChange(newProfile);
+
+    try {
+      const body = new FormData();
+      const ingredientNames = analysisResults.ingredients.map((ing: any) => ing.name);
+
+      body.append('ingredients', JSON.stringify(ingredientNames));
+      body.append('profile', JSON.stringify(newProfile));
+      if (uploadedFile) {
+        body.append('filename', uploadedFile.name);
+      }
+
+      const res = await fetch('/api/check', { method: 'POST', body });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || `Server error (${res.status})`);
+      }
+
+      setAnalysisResults(data);
+      setCheckState('done');
+    } catch (error: any) {
+      console.error('Error re-checking ingredients:', error);
+      setErrorMessage(error.message || 'Something went wrong');
+      setCheckState('error');
+    }
+  };
+
   return (
-    <div className="flex min-h-svh flex-col bg-white">
-      <header className="sticky top-0 z-10 border-b border-slate-100 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">🧴</span>
-            <span className="font-semibold text-slate-800 tracking-tight">
-              Cosmetic Checker
-            </span>
-          </div>
+    <div className="flex min-h-svh flex-col">
+      <header className="sticky top-0 z-20 border-b border-line bg-bone/85 backdrop-blur-sm">
+        <div className="mx-auto flex max-w-xl items-center justify-between px-5 py-3.5">
+          <Logo />
           {checkState === 'done' && (
             <button
               onClick={handleReset}
-              className="text-xs font-semibold text-indigo-600 hover:text-indigo-500"
+              className="border border-line bg-paper px-3 py-1.5 text-xs font-semibold text-stone transition-colors hover:border-ink hover:text-ink cursor-pointer rounded-md"
             >
-              Start Over
+              Start over
             </button>
           )}
         </div>
       </header>
 
-      <main className="flex flex-1 flex-col items-center px-4 py-8">
-        <div className="w-full max-w-lg space-y-6">
+      <main className="flex flex-1 flex-col items-center px-5 pb-16 pt-8">
+        <div className="w-full max-w-xl space-y-5">
           {checkState !== 'done' && (
             <>
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900 leading-snug">
-                  Check your product
+              <div className="animate-fade-up text-left">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone">
+                  <Sparkles className="h-3.5 w-3.5" strokeWidth={1.6} />
+                  AI ingredient analysis
+                </span>
+                <h1 className="mt-3 font-display text-[2.6rem] font-normal leading-[1.05] tracking-[-0.01em] text-ink sm:text-[3.25rem]">
+                  Know what&apos;s in
+                  <br />
+                  <span className="italic">your skincare.</span>
                 </h1>
-                <p className="mt-1 text-sm text-slate-500">
-                  Upload a photo of the ingredients label or product packaging.
+                <p className="mt-3 max-w-md text-[15px] leading-relaxed text-stone">
+                  Set your skin profile, scan an ingredients label, and Lumi decodes
+                  every ingredient — personalized to your skin.
                 </p>
               </div>
 
-              <ImageUpload onFile={handleFile} onReset={handleReset} />
+              <div className="animate-fade-up [animation-delay:50ms]">
+                <SkinProfileSelector profile={profile} onChange={handleProfileChange} />
+              </div>
+
+              <div className="animate-fade-up [animation-delay:100ms]">
+                <ImageUpload onFile={handleFile} onReset={handleReset} />
+              </div>
 
               {uploadedFile && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5">
-                    <svg
-                      className="h-4 w-4 shrink-0 text-slate-400"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={1.5}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 3.75h16.5v13.5H3.75V3.75z"
-                      />
-                    </svg>
-                    <span className="truncate text-xs text-slate-600">
-                      {uploadedFile.name}
-                    </span>
-                    <span className="ml-auto shrink-0 text-xs text-slate-400">
+                <div className="animate-fade-up space-y-3">
+                  <div className="flex items-center gap-3 border border-line bg-paper px-4 py-3 rounded-lg">
+                    <ImageIcon className="h-4 w-4 shrink-0 text-mist" strokeWidth={1.6} />
+                    <span className="truncate text-sm font-medium text-ink">{uploadedFile.name}</span>
+                    <span className="ml-auto shrink-0 text-xs font-medium text-mist">
                       {(uploadedFile.size / 1024).toFixed(0)} KB
                     </span>
                   </div>
@@ -115,62 +180,58 @@ export default function Home() {
                     type="button"
                     onClick={handleCheck}
                     disabled={checkState === 'checking'}
-                    className="w-full rounded-2xl bg-indigo-600 py-4 text-base font-semibold text-white shadow-sm transition-all active:scale-[0.98] disabled:opacity-60 hover:bg-indigo-500"
+                    className="group flex w-full items-center justify-center gap-2 bg-ink py-3.5 text-sm font-semibold tracking-wide text-bone transition-colors hover:bg-ink-soft disabled:opacity-60 cursor-pointer rounded-lg"
                   >
                     {checkState === 'checking' ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <svg
-                          className="h-4 w-4 animate-spin"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          />
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                          />
-                        </svg>
-                        Analyzing…
-                      </span>
+                      <>
+                        <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={2} />
+                        Decoding ingredients…
+                      </>
                     ) : (
-                      'Check Ingredients'
+                      <>
+                        Decode ingredients
+                        <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" strokeWidth={2} />
+                      </>
                     )}
                   </button>
 
                   {checkState === 'error' && (
-                    <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
-                      <p className="text-sm font-medium text-red-700">
-                        Something went wrong
-                      </p>
+                    <div className="animate-fade-up border border-bad/30 bg-bad-bg px-4 py-3.5 rounded-lg">
+                      <p className="text-sm font-semibold text-bad">Something went wrong</p>
                       {errorMessage && (
-                        <p className="mt-1 text-xs text-red-600 font-mono break-words">
-                          {errorMessage}
-                        </p>
+                        <p className="mt-1 break-words font-mono text-xs text-bad/80">{errorMessage}</p>
                       )}
-                      <p className="mt-1.5 text-xs text-red-400">
-                        Please try again or upload a clearer image.
-                      </p>
+                      <p className="mt-1.5 text-xs text-stone">Please try again or upload a clearer photo.</p>
                     </div>
                   )}
                 </div>
               )}
+
+              <p className="pt-1 text-left text-[11px] leading-relaxed text-mist">
+                Lumi offers general guidance and isn&apos;t a substitute for professional
+                medical or dermatological advice.
+              </p>
             </>
           )}
 
+          {checkState === 'checking' && analysisResults && (
+            <div className="flex flex-col items-center justify-center gap-4 py-20 text-center animate-fade-in">
+              <LoaderCircle className="h-7 w-7 animate-spin text-ink" strokeWidth={1.6} />
+              <p className="text-sm font-medium text-stone">Re-reading the formula for your new profile…</p>
+            </div>
+          )}
+
           {checkState === 'done' && analysisResults && (
-            <AnalysisResults results={analysisResults} onReset={handleReset} />
+            <AnalysisResults
+              results={analysisResults}
+              onReset={handleReset}
+              currentProfile={profile}
+              onReAnalyze={handleReAnalyze}
+            />
           )}
         </div>
       </main>
-      
+
       {/* Real-time logging console specifically for your mobile phone debugging */}
       <MobileConsoleDebugger />
     </div>
