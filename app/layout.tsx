@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Hanken_Grotesk, Newsreader } from "next/font/google";
 import "./globals.css";
+import { AuthProvider } from "./components/AuthProvider";
 
 const hanken = Hanken_Grotesk({
   variable: "--font-hanken",
@@ -35,7 +36,9 @@ export default function RootLayout({
       lang="en"
       className={`${hanken.variable} ${newsreader.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

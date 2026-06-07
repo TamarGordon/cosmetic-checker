@@ -1,0 +1,113 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {uid} (matches the Firebase Auth user id)
+// Fields:
+//   - skinType: string (required) - one of normal|dry|oily|sensitive|combination
+//   - gender: string | null (optional, <= 30 chars) - female|male|unspecified
+//   - ageGroup: string | null (optional, <= 30 chars) - newborn|child|teen|adult|senior
+//   - conditions: list<string> (required, <= 20 items) - special needs
+//   - displayName: string | null (optional, <= 200 chars)
+//   - email: string | null (optional, <= 320 chars)
+//   - updatedAt: timestamp (required)
+//
+// Subcollection: users/{uid}/scans
+// Document ID: auto-generated
+// Fields:
+//   - productName: string (required, <= 300 chars)
+//   - rating: string (required) - Good|Average|Poor
+//   - score: number (required, 0..100)
+//   - summary: string (required, <= 8000 chars)
+//   - ingredients: list (required, <= 300 items)
+//   - skinSuitability: map | null (optional)
+//   - flags: map | null (optional)
+//   - source: string | null (optional, <= 50 chars)
+//   - profileUsed: map (required) - { skinType, conditions }
+//   - createdAt: timestamp (required, immutable)
+//
+// All data is strictly private: a user can only ever read or write
+// documents under their own users/{uid} path.
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------------------- Helper functions --------------------
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function validOptionalStringOrNull(field, maxLen) {
+      return !(field in request.resource.data) ||
+        request.resource.data[field] == null ||
+        (request.resource.data[field] is string &&
+         request.resource.data[field].size() <= maxLen);
+    }
+
+    // -------------------- users/{uid} --------------------
+    function isValidProfile() {
+      return hasOnlyAllowedFields(['skinType', 'gender', 'ageGroup', 'conditions', 'displayName', 'email', 'updatedAt']) &&
+        request.resource.data.skinType is string &&
+        request.resource.data.skinType in ['normal', 'dry', 'oily', 'sensitive', 'combination'] &&
+        validOptionalStringOrNull('gender', 30) &&
+        validOptionalStringOrNull('ageGroup', 30) &&
+        request.resource.data.conditions is list &&
+        request.resource.data.conditions.size() <= 20 &&
+        validOptionalStringOrNull('displayName', 200) &&
+        validOptionalStringOrNull('email', 320) &&
+        request.resource.data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidProfile();
+      allow update: if isOwner(userId) && isValidProfile();
+      allow delete: if isOwner(userId);
+
+      // -------------------- users/{uid}/scans --------------------
+      function isValidScan() {
+        return hasOnlyAllowedFields([
+            'productName', 'rating', 'score', 'summary', 'ingredients',
+            'skinSuitability', 'flags', 'source', 'profileUsed', 'createdAt'
+          ]) &&
+          request.resource.data.productName is string &&
+          request.resource.data.productName.size() > 0 &&
+          request.resource.data.productName.size() <= 300 &&
+          request.resource.data.rating is string &&
+          request.resource.data.rating in ['Good', 'Average', 'Poor'] &&
+          request.resource.data.score is number &&
+          request.resource.data.score >= 0 &&
+          request.resource.data.score <= 100 &&
+          request.resource.data.summary is string &&
+          request.resource.data.summary.size() <= 8000 &&
+          request.resource.data.ingredients is list &&
+          request.resource.data.ingredients.size() <= 300 &&
+          (request.resource.data.skinSuitability == null || request.resource.data.skinSuitability is map) &&
+          (request.resource.data.flags == null || request.resource.data.flags is map) &&
+          validOptionalStringOrNull('source', 50) &&
+          request.resource.data.profileUsed is map &&
+          request.resource.data.createdAt is timestamp;
+      }
+
+      match /scans/{scanId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidScan();
+        allow delete: if isOwner(userId);
+        // Scans are immutable once written.
+        allow update: if false;
+      }
+    }
+  }
+}

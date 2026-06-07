@@ -15,7 +15,7 @@ import {
   Check,
   type LucideIcon,
 } from 'lucide-react';
-import SkinProfileSelector, { SkinProfile, SkinType, SpecialCondition } from './SkinProfileSelector';
+import SkinProfileSelector, { SkinProfile } from './SkinProfileSelector';
 
 // Interfaces matching backend JSON contract
 interface Ingredient {
@@ -56,7 +56,9 @@ interface AnalysisResultsProps {
   onReset: () => void;
 }
 
-const SKIN_TYPE_LABELS: Record<SkinType, string> = {
+// Keyed loosely (string) so labels still resolve for older saved scans that may
+// carry deprecated values (e.g. the previous "sensitive" skin type).
+const SKIN_TYPE_LABELS: Record<string, string> = {
   normal: 'Normal Skin',
   dry: 'Dry Skin',
   oily: 'Oily Skin',
@@ -64,12 +66,34 @@ const SKIN_TYPE_LABELS: Record<SkinType, string> = {
   combination: 'Combination Skin',
 };
 
-const CONDITION_LABELS: Record<SpecialCondition, string> = {
-  pregnant: 'Pregnant',
-  breastfeeding: 'Breastfeeding',
+const GENDER_LABELS: Record<string, string> = {
+  female: 'Woman',
+  male: 'Man',
+  unspecified: '',
+};
+
+const AGE_GROUP_LABELS: Record<string, string> = {
+  newborn: 'Newborn',
+  child: 'Child',
+  teen: 'Teen',
+  adult: 'Adult',
+  senior: 'Senior',
+};
+
+const CONDITION_LABELS: Record<string, string> = {
+  sensitive: 'Sensitive',
+  'acne-prone': 'Acne-Prone',
   eczema: 'Eczema-Prone',
   rosacea: 'Rosacea-Prone',
-  'acne-prone': 'Acne-Prone',
+  pregnant: 'Pregnant',
+  breastfeeding: 'Breastfeeding',
+  shaving: 'Shaving',
+  dandruff: 'Dandruff',
+  'hair-care': 'Hair & Scalp',
+  'hair-loss': 'Hair Thinning',
+  'color-treated': 'Color-Treated Hair',
+  'anti-aging': 'Mature Skin',
+  'baby-gentle': 'Baby-Safe',
 };
 
 const VERDICT_ICONS: Record<'Safe' | 'Caution' | 'Avoid', LucideIcon> = {
@@ -163,14 +187,24 @@ export default function AnalysisResults({ results, currentProfile, onReAnalyze, 
             </span>
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="inline-flex items-center border border-ink bg-ink px-2.5 py-1 text-xs font-semibold text-bone rounded-md">
-                {SKIN_TYPE_LABELS[currentProfile.skinType]}
+                {SKIN_TYPE_LABELS[currentProfile.skinType] ?? 'Skin'}
               </span>
+              {currentProfile.gender && GENDER_LABELS[currentProfile.gender] && (
+                <span className="inline-flex items-center border border-line bg-bone px-2.5 py-1 text-xs font-semibold text-ink-soft rounded-md">
+                  {GENDER_LABELS[currentProfile.gender]}
+                </span>
+              )}
+              {currentProfile.ageGroup && AGE_GROUP_LABELS[currentProfile.ageGroup] && (
+                <span className="inline-flex items-center border border-line bg-bone px-2.5 py-1 text-xs font-semibold text-ink-soft rounded-md">
+                  {AGE_GROUP_LABELS[currentProfile.ageGroup]}
+                </span>
+              )}
               {currentProfile.conditions.map((cond) => (
                 <span
                   key={cond}
                   className="inline-flex items-center border border-line bg-bone px-2.5 py-1 text-xs font-semibold text-ink-soft rounded-md"
                 >
-                  {CONDITION_LABELS[cond]}
+                  {CONDITION_LABELS[cond] ?? cond}
                 </span>
               ))}
               {currentProfile.conditions.length === 0 && (

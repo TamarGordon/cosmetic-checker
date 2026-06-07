@@ -10,6 +10,34 @@ The immediate next focus areas are:
 2. **Deployment**: Configure environment variables and deploy to Vercel or similar for public access.
 3. **Disclaimers / Global UI Polish**: Enhance visual layout, ensure persistent legal disclaimer blocks, and double check on-device mobile sizing.
 
+## Firebase Integration (Auth + Firestore LIVE)
+The workspace is connected to the **`lumi-89a73`** Firebase project (display name "Lumi") via the Firebase MCP server / CLI, and **user accounts + per-user data persistence are now implemented and deployed**.
+- Authenticated CLI user: `tamargordon20@gmail.com`.
+- The directory is bound to the project through `.firebaserc` (default → `lumi-89a73`); `firebase.json` now configures `firestore` (rules + indexes) and `auth` (Google Sign-In provider).
+- One registered **Web** app (`1:1000672000901:web:fb6f79e479c35dfee3a2ec`); its public client config lives in `.env.local` as `NEXT_PUBLIC_FIREBASE_*` vars.
+- **Authentication**: Google Sign-In enabled (provisioned via `firebase deploy --only auth`). Client uses `signInWithPopup` + `onAuthStateChanged`.
+- **Firestore**: `(default)` database (Native, `nam5`) created and secured. Owner-only rules deployed (`firestore.rules`, validated + deployed).
+- **Billing**: still Spark (free) — Auth + Firestore run fully on the free tier, so no Blaze upgrade was needed. Blaze-only services (Cloud Functions, Data Connect/Cloud SQL) remain unavailable.
+- **Gemini in Firebase ToS**: still not accepted (not needed for Auth/Firestore).
+
+### Data model (Firestore)
+- `users/{uid}` — `skinType`, `gender`, `ageGroup`, `conditions[]`, `displayName`, `email`, `updatedAt`. Stores the user's personal-care profile.
+- `users/{uid}/scans/{scanId}` — one doc per completed analysis: `productName`, `rating`, `score`, `summary`, `ingredients[]`, `skinSuitability`, `flags`, `source`, `profileUsed` (now `{ skinType, gender, ageGroup, conditions }`), `createdAt`.
+
+### Profile model expansion (gender, life stage, gender/age-gated special needs)
+The profile now captures more than skin type:
+- **`gender`**: `female` | `male` | `unspecified` (default `unspecified`).
+- **`ageGroup`** (life stage): `newborn` | `child` | `teen` | `adult` | `senior` (default `adult`).
+- **`skinType`**: `normal` | `dry` | `oily` | `combination` — **`sensitive` was REMOVED as a skin type and moved into Special needs.**
+- **`conditions` (Special needs)**: `sensitive`, `acne-prone`, `eczema`, `rosacea`, `pregnant`, `breastfeeding`, `shaving`, `dandruff`, `hair-care`, `hair-loss`, `color-treated`, `anti-aging`, `baby-gentle`.
+- **Gender/age gating**: each special need can declare `genders`/`ageGroups`; the selector only shows relevant ones (e.g. pregnant/breastfeeding → female + teen/adult; shaving/anti-aging/hair → age-gated; baby-gentle → newborn/child). Changing gender/age auto-prunes now-irrelevant selected conditions.
+- Backward compatibility: loaders (`getUserProfile`, `getScans`, sessionStorage restore) and the API default-fill `gender`→`unspecified`, `ageGroup`→`adult`; result/label maps tolerate the deprecated `sensitive` skin type. Firestore rules still accept `sensitive` in the `skinType` enum for old docs.
+
+### Auth/data behavior
+- **Guest mode preserved**: signed-out users still scan; profile persists via `sessionStorage` only.
+- **Signed-in**: on sign-in the app loads `users/{uid}` profile from Firestore (migrating any local sessionStorage profile up on first sign-in). Profile edits write through to Firestore; every completed full scan is appended to `users/{uid}/scans`. Re-analyses are NOT saved (kept to one history entry per scanned product).
+- New files: `app/lib/firebase.ts` (SDK init), `app/lib/userData.ts` (profile + scan helpers), `app/components/AuthProvider.tsx` (context), `app/components/AuthControls.tsx` (header sign-in/out + history menu), `app/components/ScanHistory.tsx` (history overlay). `app/layout.tsx` wraps the tree in `AuthProvider`.
+
 ---
 
 ## Current State of the Codebase
@@ -24,7 +52,7 @@ The immediate next focus areas are:
 ### Backend API `/api/check` (Complete ✅)
 - Accepts `POST` with `FormData` containing `image` (for new scans) or stringified `ingredients` array (for rapid re-scans with changed profiles).
 - Accepts stringified `profile` (skinType + conditions).
-- Calls **Claude 4.6 Sonnet** (`claude-sonnet-4-6`) vision API with base64 images or parses pre-extracted ingredients.
+- Calls **Claude Haiku 4.5** (`claude-haiku-4-5`) vision API with base64 images or parses pre-extracted ingredients.
 - Instructs the AI model to perform ingredient-by-ingredient safety analysis, returning general safety ratings, purposes, descriptions, AND a personalized `personalVerdict` (`Safe` | `Caution` | `Avoid`) and `personalExplanation` specifically addressing the user's skin profile!
 - **Backwards-Compatible Mock Fallback**: When no Anthropic API key is configured, the server processes mock data (CeraVe, The Ordinary, or standard moisturizer) and *dynamically personalizes* ingredient verdicts, descriptions, product ratings, and overall scores based on the incoming profile.
 

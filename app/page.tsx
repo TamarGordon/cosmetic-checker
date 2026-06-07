@@ -6,29 +6,45 @@ import ImageUpload from './components/ImageUpload';
 import AnalysisResults from './components/AnalysisResults';
 import SkinProfileSelector, { SkinProfile } from './components/SkinProfileSelector';
 import MobileConsoleDebugger from './components/MobileConsoleDebugger';
+import AuthControls from './components/AuthControls';
+import ScanHistory from './components/ScanHistory';
 import { Logo } from './components/Logo';
+import { useAuth } from './components/AuthProvider';
+import {
+  getUserProfile,
+  saveUserProfile,
+  addScan,
+  getScans,
+  type SavedScan,
+} from './lib/userData';
 
 type CheckState = 'idle' | 'checking' | 'done' | 'error';
 
 const DEFAULT_PROFILE: SkinProfile = {
   skinType: 'normal',
+  gender: 'unspecified',
+  ageGroup: 'adult',
   conditions: [],
 };
 
 export default function Home() {
+  const { user } = useAuth();
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [checkState, setCheckState] = useState<CheckState>('idle');
   const [analysisResults, setAnalysisResults] = useState<any | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [profile, setProfile] = useState<SkinProfile>(DEFAULT_PROFILE);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [scans, setScans] = useState<SavedScan[]>([]);
+  const [scansLoading, setScansLoading] = useState(false);
 
-  // Load profile from sessionStorage on mount
+  // Load profile from sessionStorage on mount (guest + initial state)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
         const saved = sessionStorage.getItem('cosmetic-checker-profile');
         if (saved) {
-          setProfile(JSON.parse(saved));
+          setProfile({ ...DEFAULT_PROFILE, ...JSON.parse(saved) });
         }
       } catch (e) {
         console.error('Failed to load profile', e);
@@ -36,7 +52,38 @@ export default function Home() {
     }
   }, []);
 
-  // Update profile and persist in sessionStorage
+  // When a user signs in, load their saved profile from Firestore.
+  // If they have none yet, migrate the current local profile up to Firestore.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await getUserProfile(user.uid);
+        if (cancelled) return;
+        if (remote) {
+          setProfile(remote);
+          try {
+            sessionStorage.setItem('cosmetic-checker-profile', JSON.stringify(remote));
+          } catch {}
+        } else {
+          await saveUserProfile(user.uid, profile, {
+            displayName: user.displayName,
+            email: user.email,
+          });
+        }
+      } catch (e) {
+        console.error('Failed to sync profile with Firestore', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // We intentionally only re-run when the signed-in user changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // Update profile and persist (sessionStorage always; Firestore when signed in)
   const handleProfileChange = (newProfile: SkinProfile) => {
     setProfile(newProfile);
     if (typeof window !== 'undefined') {
@@ -46,6 +93,34 @@ export default function Home() {
         console.error('Failed to save profile', e);
       }
     }
+    if (user) {
+      saveUserProfile(user.uid, newProfile, {
+        displayName: user.displayName,
+        email: user.email,
+      }).catch((e) => console.error('Failed to save profile to Firestore', e));
+    }
+  };
+
+  const handleOpenHistory = async () => {
+    setHistoryOpen(true);
+    if (!user) return;
+    setScansLoading(true);
+    try {
+      setScans(await getScans(user.uid));
+    } catch (e) {
+      console.error('Failed to load scan history', e);
+    } finally {
+      setScansLoading(false);
+    }
+  };
+
+  const handleOpenSavedScan = (scan: SavedScan) => {
+    setAnalysisResults(scan);
+    setProfile(scan.profileUsed);
+    setUploadedFile(null);
+    setErrorMessage(null);
+    setCheckState('done');
+    setHistoryOpen(false);
   };
 
   const handleFile = (file: File, _previewUrl: string) => {
@@ -81,6 +156,11 @@ export default function Home() {
 
       setAnalysisResults(data);
       setCheckState('done');
+      if (user) {
+        addScan(user.uid, data, profile).catch((e) =>
+          console.error('Failed to save scan to history', e)
+        );
+      }
     } catch (error: any) {
       console.error('Error checking ingredients:', error);
       setErrorMessage(error.message || 'Something went wrong');
@@ -127,14 +207,17 @@ export default function Home() {
       <header className="sticky top-0 z-20 border-b border-line bg-bone/85 backdrop-blur-sm">
         <div className="mx-auto flex max-w-xl items-center justify-between px-5 py-3.5">
           <Logo />
-          {checkState === 'done' && (
-            <button
-              onClick={handleReset}
-              className="border border-line bg-paper px-3 py-1.5 text-xs font-semibold text-stone transition-colors hover:border-ink hover:text-ink cursor-pointer rounded-md"
-            >
-              Start over
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {checkState === 'done' && (
+              <button
+                onClick={handleReset}
+                className="border border-line bg-paper px-3 py-1.5 text-xs font-semibold text-stone transition-colors hover:border-ink hover:text-ink cursor-pointer rounded-md"
+              >
+                Start over
+              </button>
+            )}
+            <AuthControls onOpenHistory={handleOpenHistory} />
+          </div>
         </div>
       </header>
 
@@ -231,6 +314,15 @@ export default function Home() {
           )}
         </div>
       </main>
+
+      {historyOpen && (
+        <ScanHistory
+          scans={scans}
+          loading={scansLoading}
+          onClose={() => setHistoryOpen(false)}
+          onOpen={handleOpenSavedScan}
+        />
+      )}
 
       {/* Real-time logging console specifically for your mobile phone debugging */}
       <MobileConsoleDebugger />

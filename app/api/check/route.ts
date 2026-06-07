@@ -381,9 +381,13 @@ const MOCK_PRODUCTS: Record<string, Omit<AnalysisResponse, 'success' | 'source' 
 };
 
 // Helper to dynamically personalize mock data based on the selected skin profile
-function personalizeMockData(mockKey: string, profile: { skinType: string; conditions: string[] }) {
+function personalizeMockData(
+  mockKey: string,
+  profile: { skinType: string; gender?: string; ageGroup?: string; conditions: string[] }
+) {
   const baseMock = JSON.parse(JSON.stringify(MOCK_PRODUCTS[mockKey] || MOCK_PRODUCTS.default));
   const { skinType, conditions } = profile;
+  const ageGroup = profile.ageGroup || 'adult';
 
   const ingredients = baseMock.ingredients.map((ing: any) => {
     let personalVerdict: 'Safe' | 'Caution' | 'Avoid' = 'Safe';
@@ -441,6 +445,58 @@ function personalizeMockData(mockKey: string, profile: { skinType: string; condi
       }
     }
 
+    // 5. Newborn / child or baby-safe special need: delicate young skin
+    if (ageGroup === 'newborn' || ageGroup === 'child' || conditions.includes('baby-gentle')) {
+      if (
+        nameLower.includes('fragrance') || nameLower.includes('parfum') ||
+        nameLower.includes('essential oil') || nameLower.includes('limonene') || nameLower.includes('linalool')
+      ) {
+        personalVerdict = 'Avoid';
+        personalExplanation = 'Avoid: Fragrances and essential oils are common sensitizers and are not recommended for delicate newborn or young children\u2019s skin.';
+      } else if (nameLower.includes('salicylic') || nameLower.includes('retin') || nameLower.includes('benzoyl')) {
+        personalVerdict = 'Avoid';
+        personalExplanation = 'Avoid: Strong actives like acids and retinoids are far too harsh for a baby or young child\u2019s thin, developing skin barrier.';
+      } else if (nameLower.includes('ceramide') || nameLower.includes('glycerin') || nameLower.includes('hyaluronic')) {
+        personalVerdict = 'Safe';
+        personalExplanation = 'Gentle and well-tolerated \u2014 ideal for nourishing and protecting delicate young skin.';
+      }
+    }
+
+    // 6. Shaving: soothe and protect freshly shaved skin
+    if (conditions.includes('shaving')) {
+      if (nameLower.includes('alcohol denat') || nameLower.includes('fragrance') || nameLower.includes('parfum') || nameLower.includes('menthol')) {
+        personalVerdict = 'Avoid';
+        personalExplanation = 'Avoid: Drying alcohols and fragrances sting and inflame freshly shaved skin, worsening razor burn and ingrown hairs.';
+      } else if (nameLower.includes('glycerin') || nameLower.includes('aloe') || nameLower.includes('niacinamide') || nameLower.includes('panthenol') || nameLower.includes('allantoin')) {
+        personalVerdict = 'Safe';
+        personalExplanation = 'Great for shaving \u2014 soothing and barrier-supporting, it calms post-shave irritation and redness.';
+      }
+    }
+
+    // 7. Hair & scalp needs (dandruff, hair care, hair thinning, color-treated)
+    if (
+      conditions.includes('dandruff') || conditions.includes('hair-care') ||
+      conditions.includes('hair-loss') || conditions.includes('color-treated')
+    ) {
+      if (nameLower.includes('sulfate') || nameLower.includes('sles') || nameLower.includes('sodium laureth') || nameLower.includes('sodium lauryl')) {
+        personalVerdict = conditions.includes('color-treated') ? 'Avoid' : 'Caution';
+        personalExplanation = conditions.includes('color-treated')
+          ? 'Avoid: Harsh sulfates strip color from chemically treated hair and dry out the scalp.'
+          : 'Caution: Sulfates can over-strip the scalp, which may aggravate flaking and dryness.';
+      } else if (nameLower.includes('zinc') || nameLower.includes('salicylic') || nameLower.includes('niacinamide') || nameLower.includes('caffeine') || nameLower.includes('panthenol')) {
+        personalVerdict = 'Safe';
+        personalExplanation = 'Beneficial for scalp & hair \u2014 helps balance the scalp, reduce flaking, and support healthier hair.';
+      }
+    }
+
+    // 8. Mature skin / anti-aging
+    if (conditions.includes('anti-aging') || ageGroup === 'senior') {
+      if (nameLower.includes('niacinamide') || nameLower.includes('tocopher') || nameLower.includes('vitamin e') || nameLower.includes('hyaluronic') || nameLower.includes('peptide')) {
+        personalVerdict = 'Safe';
+        personalExplanation = 'Recommended for mature skin \u2014 supports firmness, hydration, and antioxidant defense against visible aging.';
+      }
+    }
+
     return {
       ...ing,
       personalVerdict,
@@ -485,7 +541,9 @@ export async function POST(req: NextRequest) {
     const ingredientsStr = formData.get('ingredients') as string | null;
     const filenameStr = formData.get('filename') as string | null;
 
-    const profile = profileStr ? JSON.parse(profileStr) : { skinType: 'normal', conditions: [] };
+    const profile = profileStr
+      ? JSON.parse(profileStr)
+      : { skinType: 'normal', gender: 'unspecified', ageGroup: 'adult', conditions: [] };
     const parsedIngredients = ingredientsStr ? JSON.parse(ingredientsStr) : null;
     const filename = (image?.name || filenameStr || '').toLowerCase();
 
@@ -507,9 +565,19 @@ export async function POST(req: NextRequest) {
         let base64Image = '';
 
         const profileText = `
-The user has the following Skin Profile:
+The user has the following Personal Care Profile:
 - Skin Type: ${profile.skinType.toUpperCase()}
-- Special Conditions: ${profile.conditions.length > 0 ? profile.conditions.map((c: string) => c.toUpperCase()).join(', ') : 'NONE'}
+- Gender: ${(profile.gender || 'unspecified').toUpperCase()}
+- Life Stage / Age Group: ${(profile.ageGroup || 'adult').toUpperCase()}
+- Special Needs: ${profile.conditions.length > 0 ? profile.conditions.map((c: string) => c.toUpperCase()).join(', ') : 'NONE'}
+
+Tailor the personalized verdicts to ALL of the above. For example:
+- For a NEWBORN or CHILD, prioritize ultra-gentle, fragrance-free, low-irritation formulas and flag any harsh actives, essential oils, or strong preservatives as unsuitable for delicate young skin.
+- For SHAVING needs, favor soothing, anti-inflammatory, barrier-supporting ingredients and caution against irritants, drying alcohols, and strong fragrances that worsen razor burn.
+- For DANDRUFF or HAIR & SCALP / HAIR THINNING needs, evaluate scalp-relevant actives (e.g. anti-fungals, salicylic acid, zinc pyrithione, niacinamide, caffeine) and flag harsh sulfates or heavy silicones.
+- For COLOR-TREATED HAIR, caution against harsh sulfates and clarifying agents that strip color.
+- For PREGNANT or BREASTFEEDING users, strictly flag retinoids, high-strength salicylic acid, and benzoyl peroxide.
+- For MATURE SKIN (anti-aging), highlight beneficial actives like retinoids, peptides, antioxidants, and SPF relevance.
 `;
 
         if (image) {
@@ -700,7 +768,7 @@ Do not include any markdown styling, HTML formatting, code fences like \`\`\`jso
             'content-type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
+            model: 'claude-haiku-4-5',
             max_tokens: 4000,
             system: systemPrompt,
             messages,
